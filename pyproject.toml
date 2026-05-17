@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "steg-toolkit"
+version = "0.1.0"
+description = "Image steganography helpers: LSB hide/extract, strings recovery, entropy analysis."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [{ name = "@forgehk" }]
+keywords = ["steganography", "ctf", "security", "lsb", "pillow"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Security :: Cryptography",
+]
+dependencies = ["pillow>=10"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+steg = "steg_toolkit.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["steg_toolkit*"]
