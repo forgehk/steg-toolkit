@@ -2,7 +2,7 @@
 
 > Image-steganography helpers for CTFs and security challenges. LSB hide/extract, `strings`-like text recovery, and entropy / heatmap analysis — pure Python, Pillow only.
 
-[![Python](https://img.shields.io/badge/Python-3.11+-3776AB.svg)]() [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![CI](https://github.com/forgehk/steg-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/forgehk/steg-toolkit/actions/workflows/ci.yml) [![Python](https://img.shields.io/badge/Python-3.11+-3776AB.svg)]() [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
 
