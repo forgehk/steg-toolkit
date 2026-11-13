@@ -9,6 +9,17 @@ from pathlib import Path
 from . import analysis, lsb
 
 
+def _add_plane_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--bit", type=int, default=0, choices=range(8), metavar="N",
+        help="bit plane to use, 0 (LSB, default) to 7 (MSB)",
+    )
+    parser.add_argument(
+        "--channels", default="RGB", metavar="CHANS",
+        help="channels that carry data, in order, e.g. RGB (default), B or A",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="steg", description="Image steganography helpers.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -16,9 +27,11 @@ def main(argv: list[str] | None = None) -> int:
     h = sub.add_parser("hide", help="Embed a payload in image LSB.")
     h.add_argument("cover", type=Path); h.add_argument("payload", type=Path)
     h.add_argument("-o", "--out", required=True, type=Path)
+    _add_plane_args(h)
 
     e = sub.add_parser("extract", help="Recover LSB payload.")
     e.add_argument("stego", type=Path); e.add_argument("-o", "--out", type=Path, default=None)
+    _add_plane_args(e)
 
     s = sub.add_parser("strings", help="ASCII recovery from raw bytes.")
     s.add_argument("image", type=Path); s.add_argument("--min", type=int, default=4)
@@ -32,10 +45,14 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     try:
         if args.cmd == "hide":
-            n = lsb.hide_in_image(args.cover, args.payload.read_bytes(), args.out)
-            print(f"embedded {n} bytes into LSB of {args.cover.name} -> {args.out}")
+            n = lsb.hide_in_image(args.cover, args.payload.read_bytes(), args.out,
+                                  bit=args.bit, channels=args.channels)
+            where = "LSB" if args.bit == 0 else f"bit {args.bit}"
+            if args.channels.upper() != "RGB":
+                where += f" of {args.channels.upper()}"
+            print(f"embedded {n} bytes into {where} of {args.cover.name} -> {args.out}")
         elif args.cmd == "extract":
-            data = lsb.extract_from_image(args.stego)
+            data = lsb.extract_from_image(args.stego, bit=args.bit, channels=args.channels)
             if args.out:
                 args.out.write_bytes(data); print(f"wrote {len(data)} bytes -> {args.out}")
             else:
