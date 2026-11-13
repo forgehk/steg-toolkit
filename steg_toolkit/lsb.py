@@ -1,8 +1,15 @@
 """LSB hide and extract for PNG-like images.
 
-Format: first 32 bits of the LSB stream are a big-endian payload length,
-followed by the payload bytes. Channels are written in row-major order:
-(0,0).R, (0,0).G, (0,0).B, (0,1).R, ...
+Format: first 32 bits of the embedded stream are a big-endian payload length,
+followed by the payload bytes. Bits are written in row-major pixel order and,
+within a pixel, in the order of the selected channels. With the defaults
+(bit 0, channels "RGB") that is (0,0).R, (0,0).G, (0,0).B, (0,1).R, ...
+
+`bit` picks the bit plane (0 = least significant, 7 = most significant) and
+`channels` picks which of R, G, B and A carry data, so the same helpers cover
+the 2nd-LSB and alpha-only variants that show up in CTF challenges. The
+extractor has to be given the same `bit` and `channels` the payload was
+hidden with.
 """
 
 from __future__ import annotations
@@ -10,6 +17,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from PIL import Image
+
+_VALID_CHANNELS = "RGBA"
 
 
 def _bits_of(data: bytes) -> list[int]:
@@ -30,11 +39,50 @@ def _bits_to_bytes(bits: list[int]) -> bytes:
     return bytes(out)
 
 
-def hide_in_image(cover_path: str | Path, payload: bytes, out_path: str | Path) -> int:
-    """Embed `payload` into the cover image's LSB plane. Returns bytes embedded."""
-    cover = Image.open(cover_path).convert("RGB")
-    pixels = list(cover.getdata())  # list of (r, g, b)
-    capacity_bits = len(pixels) * 3
+def _pixels(img: Image.Image) -> list[tuple[int, ...]]:
+    """Return the image's pixels as a list of tuples.
+
+    ``Image.getdata`` is deprecated in recent Pillow releases and the
+    replacement ``get_flattened_data`` only exists from Pillow 11.3, so use
+    whichever this Pillow has.
+    """
+    reader = getattr(img, "get_flattened_data", None) or img.getdata
+    return list(reader())
+
+
+def _check_plane(bit: int, channels: str) -> tuple[str, list[int]]:
+    """Validate `bit` and `channels`; return the image mode and channel indices."""
+    if not isinstance(bit, int) or not 0 <= bit <= 7:
+        raise ValueError(f"bit must be between 0 and 7, got {bit!r}")
+    chans = channels.upper()
+    if not chans:
+        raise ValueError("channels must name at least one of R, G, B, A")
+    bad = sorted(set(chans) - set(_VALID_CHANNELS))
+    if bad:
+        raise ValueError(f"unknown channel(s) {''.join(bad)!r}; use R, G, B or A")
+    if len(set(chans)) != len(chans):
+        raise ValueError(f"channels must not repeat, got {channels!r}")
+    mode = "RGBA" if "A" in chans else "RGB"
+    return mode, [_VALID_CHANNELS.index(c) for c in chans]
+
+
+def hide_in_image(
+    cover_path: str | Path,
+    payload: bytes,
+    out_path: str | Path,
+    *,
+    bit: int = 0,
+    channels: str = "RGB",
+) -> int:
+    """Embed `payload` into bit plane `bit` of `channels`. Returns bytes embedded.
+
+    Selecting the alpha channel writes an RGBA image; the output format has to
+    keep alpha losslessly (PNG does).
+    """
+    mode, idx = _check_plane(bit, channels)
+    cover = Image.open(cover_path).convert(mode)
+    pixels = _pixels(cover)
+    capacity_bits = len(pixels) * len(idx)
     header = len(payload).to_bytes(4, "big")
     bits = _bits_of(header + payload)
     if len(bits) > capacity_bits:
@@ -42,26 +90,41 @@ def hide_in_image(cover_path: str | Path, payload: bytes, out_path: str | Path) 
             f"payload too large: need {len(bits)} bits, image holds {capacity_bits}"
         )
 
-    new_pixels: list[tuple[int, int, int]] = []
+    clear = ~(1 << bit) & 0xFF
+    new_pixels: list[tuple[int, ...]] = []
     bi = 0
-    for r, g, b in pixels:
-        if bi < len(bits): r = (r & ~1) | bits[bi]; bi += 1
-        if bi < len(bits): g = (g & ~1) | bits[bi]; bi += 1
-        if bi < len(bits): b = (b & ~1) | bits[bi]; bi += 1
-        new_pixels.append((r, g, b))
-    out = Image.new("RGB", cover.size)
+    for px in pixels:
+        if bi < len(bits):
+            values = list(px)
+            for c in idx:
+                if bi >= len(bits):
+                    break
+                values[c] = (values[c] & clear) | (bits[bi] << bit)
+                bi += 1
+            px = tuple(values)
+        new_pixels.append(px)
+    out = Image.new(mode, cover.size)
     out.putdata(new_pixels)
     out.save(out_path)
     return len(payload)
 
 
-def extract_from_image(stego_path: str | Path) -> bytes:
-    """Recover the payload from a stego image. Reads the 4-byte length header first."""
-    img = Image.open(stego_path).convert("RGB")
-    pixels = list(img.getdata())
+def extract_from_image(
+    stego_path: str | Path,
+    *,
+    bit: int = 0,
+    channels: str = "RGB",
+) -> bytes:
+    """Recover the payload from bit plane `bit` of `channels`.
+
+    Reads the 4-byte length header first.
+    """
+    mode, idx = _check_plane(bit, channels)
+    img = Image.open(stego_path).convert(mode)
     bits: list[int] = []
-    for r, g, b in pixels:
-        bits.extend([r & 1, g & 1, b & 1])
+    for px in _pixels(img):
+        for c in idx:
+            bits.append((px[c] >> bit) & 1)
 
     header_bits = bits[:32]
     if len(header_bits) < 32:
